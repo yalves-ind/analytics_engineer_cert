@@ -2,134 +2,234 @@ version: 2
 
 models:
   - name: fct_sales
-    description: "Tabela fato de vendas. Grão: linha do pedido (sales order detail). Contém métricas de quantidade, valor bruto e valor líquido."
+    description: >
+      Tabela fato central do modelo, contendo todas as transações de venda da Adventure Works.
+      Cada linha representa um item vendido dentro de um pedido (grão: sales_order_detail).
+      Métricas calculadas: gross_amount (unitprice × orderqty) e net_amount (unitprice × orderqty × (1 - discount)).
+      Origens: sales_salesorderheader + sales_salesorderdetail.
     columns:
       - name: sales_order_detail_id
-        description: "Identificador único da linha do pedido"
+        description: "Identificador único da linha do pedido. PK da tabela fato."
         tests:
           - unique
           - not_null
       - name: sales_order_id
-        description: "Identificador do pedido"
+        description: "Identificador do pedido. Usado para contagem distinta de pedidos e join com bridge_sales_order_reason."
         tests:
           - not_null
       - name: order_date
-        description: "Data do pedido"
+        description: "Data do pedido (timestamp). Origem: salesorderheader.orderdate."
       - name: order_date_key
-        description: "Chave para join com dim_date"
+        description: "Data do pedido em formato date. FK para dim_date."
+      - name: due_date
+        description: "Data de vencimento do pedido."
+      - name: ship_date
+        description: "Data de envio do pedido."
       - name: status
-        description: "Status do pedido (1=In Process, 2=Approved, 3=Backordered, 4=Rejected, 5=Shipped, 6=Cancelled)"
+        description: "Status do pedido: 1=In Process, 2=Approved, 3=Backordered, 4=Rejected, 5=Shipped, 6=Cancelled."
+      - name: online_order_flag
+        description: "Flag indicando se o pedido foi feito online (1) ou por vendedor (0)."
       - name: customer_id
-        description: "FK para dim_customer"
+        description: "FK para dim_customer."
         tests:
           - not_null
+      - name: salesperson_id
+        description: "Identificador do vendedor responsável pelo pedido."
+      - name: territory_id
+        description: "Identificador do território de vendas."
       - name: address_id
-        description: "FK para dim_address (endereço de envio)"
+        description: "FK para dim_address. Endereço de envio (ship_to_address_id)."
       - name: credit_card_id
-        description: "FK para dim_credit_card"
+        description: "FK para dim_credit_card. Pode ser nulo para pedidos online sem cartão."
       - name: product_id
-        description: "FK para dim_product"
+        description: "FK para dim_product."
         tests:
           - not_null
+      - name: special_offer_id
+        description: "Identificador da oferta especial aplicada ao item."
       - name: order_qty
-        description: "Quantidade comprada"
+        description: "Quantidade comprada do produto neste item do pedido."
       - name: unit_price
-        description: "Preço unitário do produto"
+        description: "Preço unitário do produto no momento da venda."
       - name: unit_price_discount
-        description: "Percentual de desconto aplicado"
+        description: "Percentual de desconto aplicado (0 a 1). Ex: 0.02 = 2% de desconto."
       - name: gross_amount
-        description: "Valor bruto (unit_price * order_qty)"
+        description: "Valor bruto da linha: unit_price × order_qty. Usado para cálculo de vendas brutas."
       - name: net_amount
-        description: "Valor líquido (unit_price * order_qty * (1 - discount))"
+        description: "Valor líquido da linha: unit_price × order_qty × (1 - unit_price_discount). Valor após desconto."
 
   - name: dim_customer
-    description: "Dimensão de clientes com dados pessoais vindos de sales_customer e person_person."
+    description: >
+      Dimensão de clientes. Combina dados de cadastro (sales_customer) com dados pessoais (person_person)
+      para fornecer o nome completo do cliente. Usada para rankings de clientes e filtros por cliente
+      nas perguntas de negócio. O nome do cliente vem de person.Name conforme dicionário de dados.
+      Origens: sales_customer + person_person.
     columns:
       - name: customer_id
-        description: "Identificador único do cliente"
+        description: "Identificador único do cliente. PK desta dimensão."
         tests:
           - unique
           - not_null
+      - name: person_id
+        description: "FK para person_person. Pode ser nulo para clientes do tipo loja (store)."
+      - name: store_id
+        description: "FK para store. Preenchido quando o cliente é uma loja, não pessoa física."
+      - name: territory_id
+        description: "Território de vendas ao qual o cliente pertence."
+      - name: first_name
+        description: "Primeiro nome do cliente."
+      - name: middle_name
+        description: "Nome do meio do cliente."
+      - name: last_name
+        description: "Sobrenome do cliente."
       - name: full_name
-        description: "Nome completo do cliente"
+        description: "Nome completo do cliente (first_name + last_name). Campo principal para exibição no BI."
+      - name: person_type
+        description: "Tipo de pessoa: SC=Store Contact, IN=Individual, SP=Sales Person, EM=Employee, VC=Vendor Contact, GC=General Contact."
+      - name: email_promotion
+        description: "Preferência de promoção por email: 0=sem promoção, 1=da AW, 2=da AW e parceiros."
 
   - name: dim_product
-    description: "Dimensão de produtos com subcategoria e categoria, vindos de production_product, production_productsubcategory e production_productcategory."
+    description: >
+      Dimensão de produtos com hierarquia completa: produto → subcategoria → categoria.
+      Permite análises desde o produto individual até a categoria mais ampla.
+      O nome do produto vem de Product.name conforme dicionário de dados.
+      Origens: production_product + production_productsubcategory + production_productcategory.
     columns:
       - name: product_id
-        description: "Identificador único do produto"
+        description: "Identificador único do produto. PK desta dimensão."
         tests:
           - unique
           - not_null
       - name: product_name
-        description: "Nome do produto"
+        description: "Nome do produto. Campo principal para exibição no BI."
+      - name: product_number
+        description: "Código alfanumérico do produto (ex: BK-M82S-38)."
+      - name: color
+        description: "Cor do produto. Pode ser nulo para produtos sem cor definida."
+      - name: product_line
+        description: "Linha do produto: R=Road, M=Mountain, T=Touring, S=Standard."
+      - name: product_class
+        description: "Classe do produto: H=High, M=Medium, L=Low."
+      - name: product_style
+        description: "Estilo do produto: W=Women, M=Men, U=Universal."
+      - name: size
+        description: "Tamanho do produto."
+      - name: list_price
+        description: "Preço de lista do produto."
+      - name: standard_cost
+        description: "Custo padrão de fabricação do produto."
+      - name: sell_start_date
+        description: "Data de início de comercialização."
+      - name: sell_end_date
+        description: "Data de fim de comercialização. Nulo se ainda em venda."
       - name: subcategory_name
-        description: "Nome da subcategoria do produto"
+        description: "Nome da subcategoria (ex: Mountain Bikes, Jerseys). Pode ser nulo para produtos sem subcategoria."
       - name: category_name
-        description: "Nome da categoria do produto"
+        description: "Nome da categoria (ex: Bikes, Components, Clothing, Accessories). Pode ser nulo."
 
   - name: dim_address
-    description: "Dimensão de endereços com cidade, estado e país, vindos de person_address, person_stateprovince e person_countryregion."
+    description: >
+      Dimensão geográfica desnormalizada contendo cidade, estado e país em uma única tabela.
+      Permite análises geográficas em três níveis de granularidade.
+      Os campos vêm de Address.City, StateProvince.Name e CountryRegion.Name conforme dicionário de dados.
+      O join com a fato é via ship_to_address_id (endereço de envio).
+      Origens: person_address + person_stateprovince + person_countryregion.
     columns:
       - name: address_id
-        description: "Identificador único do endereço"
+        description: "Identificador único do endereço. PK desta dimensão."
         tests:
           - unique
           - not_null
+      - name: address_line_1
+        description: "Primeira linha do endereço."
+      - name: address_line_2
+        description: "Segunda linha do endereço (complemento)."
       - name: city
-        description: "Nome da cidade"
+        description: "Nome da cidade. Campo principal para análises por cidade."
+      - name: postal_code
+        description: "Código postal/CEP."
       - name: state_name
-        description: "Nome do estado"
+        description: "Nome do estado/província. Campo principal para análises por estado."
+      - name: state_province_code
+        description: "Código abreviado do estado (ex: CA, WA, NY)."
       - name: country_name
-        description: "Nome do país"
+        description: "Nome do país. Campo principal para análises por país."
 
   - name: dim_credit_card
-    description: "Dimensão de cartões de crédito com tipo do cartão, vinda de sales_creditcard."
+    description: >
+      Dimensão de cartões de crédito. Contém apenas o tipo do cartão usado na transação.
+      Dimensão simples criada porque as perguntas de negócio pedem filtro por tipo de cartão.
+      Nota: não usamos a tabela sales_personcreditcard porque o credit_card_id já está
+      disponível diretamente no salesorderheader, eliminando junção extra.
+      Origem: sales_creditcard.
     columns:
       - name: credit_card_id
-        description: "Identificador único do cartão"
+        description: "Identificador único do cartão. PK desta dimensão."
         tests:
           - unique
           - not_null
       - name: card_type
-        description: "Tipo do cartão de crédito"
+        description: "Tipo do cartão de crédito (ex: Vista, SuperiorCard, ColonialVoice, Distinguish)."
 
   - name: dim_sales_reason
-    description: "Dimensão de motivos de venda, vinda de sales_salesreason."
+    description: >
+      Dimensão de motivos de venda. Contém o nome e o tipo do motivo pelo qual a venda foi realizada.
+      Importante para a pergunta 4-f que pede o produto com maior quantidade para motivo 'Promotion'.
+      O nome vem de SalesReason.Name conforme dicionário de dados.
+      Relação N:N com pedidos: um pedido pode ter múltiplos motivos, resolvido via bridge_sales_order_reason.
+      Origem: sales_salesreason.
     columns:
       - name: sales_reason_id
-        description: "Identificador único do motivo de venda"
+        description: "Identificador único do motivo de venda. PK desta dimensão."
         tests:
           - unique
           - not_null
       - name: sales_reason_name
-        description: "Nome do motivo de venda"
+        description: "Nome do motivo de venda (ex: Price, Quality, Promotion, Television Advertisement, Review)."
       - name: reason_type
-        description: "Tipo do motivo (Marketing, Promotion, Other)"
+        description: "Tipo do motivo: Marketing, Promotion ou Other."
 
   - name: dim_date
-    description: "Dimensão de datas gerada a partir das datas de pedido em sales_salesorderheader."
+    description: >
+      Dimensão temporal gerada a partir dos valores distintos de orderdate em sales_salesorderheader.
+      Não é uma tabela-fonte direta — os atributos temporais são extraídos via funções de data.
+      Permite análises por ano, mês, trimestre e dia da semana conforme pedido no item 4-e.
+      Origem: derivada de salesorderheader.orderdate.
     columns:
       - name: date_key
-        description: "Data como chave primária"
+        description: "Data como chave primária (formato date). PK desta dimensão."
         tests:
           - unique
           - not_null
       - name: year
-        description: "Ano"
+        description: "Ano (ex: 2011, 2012, 2013, 2014)."
       - name: month
-        description: "Mês (número)"
-      - name: month_name
-        description: "Nome do mês"
+        description: "Número do mês (1 a 12)."
+      - name: day
+        description: "Dia do mês (1 a 31)."
       - name: quarter
-        description: "Trimestre"
+        description: "Trimestre (1 a 4)."
+      - name: month_name
+        description: "Nome do mês por extenso (ex: January, February)."
+      - name: day_of_week
+        description: "Nome do dia da semana (ex: Monday, Tuesday)."
+      - name: year_month
+        description: "Ano e mês concatenados (ex: 2011-05). Útil para séries temporais no BI."
 
   - name: bridge_sales_order_reason
-    description: "Bridge table entre pedidos e motivos de venda (relação N:N). Fonte: sales_salesorderheadersalesreason e sales_salesreason."
+    description: >
+      Tabela ponte (bridge) que resolve a relação N:N entre pedidos e motivos de venda.
+      Um pedido pode ter vários motivos, e um motivo pode aparecer em vários pedidos.
+      Sem esta bridge, teríamos que duplicar linhas na fct_sales (inflando métricas) ou
+      perder a informação de motivo. A bridge mantém o grão correto da fato.
+      Origens: sales_salesorderheadersalesreason + sales_salesreason.
     columns:
       - name: sales_order_id
-        description: "FK para fct_sales"
+        description: "FK para fct_sales.sales_order_id. Identifica o pedido."
       - name: sales_reason_id
-        description: "FK para dim_sales_reason"
+        description: "FK para dim_sales_reason.sales_reason_id. Identifica o motivo."
       - name: sales_reason_name
-        description: "Nome do motivo de venda"
+        description: "Nome do motivo de venda (desnormalizado da dim para facilitar consultas)."
+      - name: reason_type
+        description: "Tipo do motivo (desnormalizado da dim para facilitar consultas)."
